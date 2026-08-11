@@ -148,27 +148,25 @@ def create_notion_page(
     title, importance, source, link, date_str, companies, body_text
 ):
     """노션 데이터베이스에 페이지 생성"""
-    # 관련 기업 태그 목록 생성 (최대 5개, 노션 문자열 제한 대응)
-    multi_select_companies = [
-        {"name": comp.replace(",", "")} for comp in companies[:5]
-    ] if companies else []
+    # 관련 기업 태그 목록 생성 (최대 5개)
+    multi_select_companies = [{"name": comp} for comp in companies[:5]] if companies else []
 
     notion.pages.create(
         parent={"database_id": DATABASE_ID},
         properties={
-            # 1. 기사 제목 (노션 표의 Title 열 이름: '이름')
+            # 1. 기사 제목 (노션 표의 Title 열 이름)
             "이름": {
                 "title": [
                     {"text": {"content": f"[{importance}] {title}"}}
                 ]
             },
-            # 2. 출처 (Select 열)
+            # 2. 출처
             "출처": {"select": {"name": source}},
-            # 3. 날짜 (Date 열)
+            # 3. 날짜
             "날짜": {"date": {"start": date_str}},
-            # 4. 관련 기업 (Multi-select 열)
+            # 4. 관련 기업
             "관련 기업": {"multi_select": multi_select_companies},
-            # 5. URL (URL 열)
+            # 5. URL
             "URL": {"url": link},
         },
         children=[
