@@ -71,7 +71,6 @@ def fetch_past_24h_articles():
             )
             if published_parsed:
                 pub_dt = datetime.datetime(*published_parsed[:6], tzinfo=datetime.timezone.utc)
-                if pub_dt >= twenty_four_hours_:`
                 if pub_dt >= twenty_four_hours_ago:
                     full_content = fetch_full_article_content(entry.link)
                     
