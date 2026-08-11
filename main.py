@@ -107,7 +107,7 @@ def check_url_exists(link):
 
 
 def analyze_with_llm(title, content, source_name):
-    """반도체 소자/공정/패키징 하드코어 전문 분석 프롬프트"""
+    """반도체 소자/공정/패키징 하드코어 전문 분석 및 한글 제목/기업 파싱"""
     system_prompt = (
         "너는 글로벌 반도체 선도 기업(삼성전자, SK하이닉스, TSMC 등)의 공정/소자/패키징 15년 차 수석 엔지니어이자, "
         "취업 준비생의 밀착 커리어 멘토야. 뜬구름 잡는 일반적인 설명이나 교과서적인 내용은 절대 배제하고, "
@@ -117,10 +117,10 @@ def analyze_with_llm(title, content, source_name):
     truncated_content = content[:6000] if content else ""
 
     user_prompt = f"""
-다음 반도체 기술 기사를 극도로 전문적이고 심층적으로 분석해줘. 취업 면접(기술 면접) 및 직무 포트폴리오에 즉시 투입할 수 있도록 전문 공학적 분석을 제공해야 해.
+다음 반도체 기술 기사를 분석하여 요구사항에 맞춰 응답해줘.
 
 출처: {source_name}
-제목: {title}
+원문 제목: {title}
 본문: {truncated_content}
 
 [중요도 기준]
@@ -130,8 +130,14 @@ def analyze_with_llm(title, content, source_name):
 
 아래 형식을 정확히 지켜서 작성해줘:
 
+[한글 제목]
+(원문 제목을 반도체 전문 용어를 살려 자연스럽고 직관적인 한국어 제목으로 번역)
+
 [중요도]
 (상, 중, 하 중 하나)
+
+[관련 기업]
+(기사에 언급된 주요 반도체 관련 기업들을 콤마로 구분하여 나열할 것. 예: 삼성전자, SK하이닉스, TSMC, Intel, NVIDIA, AMD, ASML 등)
 
 [본문 내용]
 1. 기술 심층 분석: (기사에 언급된 기술이 기존 레거시 공정/아키텍처 대비 물리적·구조적으로 무엇이 혁신적으로 다른지 상세히 분석할 것. 공정 한계(RC 딜레이, 숏채널 효과, 열팽창계수Mismatch 등), 수율(Yield) 향상 요인, 재료적 특성 변화 등 공학적 원리를 포함하여 최소 6~7문장 이상으로 매우 깊이 있게 서술)
@@ -151,14 +157,19 @@ def analyze_with_llm(title, content, source_name):
 
     result_text = response.choices[0].message.content
 
+    # 1. 한글 제목 파싱
+    korean_title = title
+    if "[한글 제목]" in result_text and "[중요도]" in result_text:
+        try:
+            korean_title = result_text.split("[한글 제목]")[1].split("[중요도]")[0].strip()
+        except Exception:
+            pass
+
+    # 2. 중요도 파싱
     importance = "중"
     if "[중요도]" in result_text:
         try:
-            imp_part = (
-                result_text.split("[중요도]")[1]
-                .split("[본문 내용]")[0]
-                .strip()
-            )
+            imp_part = result_text.split("[중요도]")[1].split("[관련 기업]")[0].strip()
             if "상" in imp_part:
                 importance = "상"
             elif "하" in imp_part:
@@ -169,43 +180,87 @@ def analyze_with_llm(title, content, source_name):
             pass
 
     if importance == "하":
-        return "SKIP", ""
+        return "SKIP", "", "", []
+
+    # 3. 관련 기업 파싱
+    companies = []
+    if "[관련 기업]" in result_text:
+        try:
+            comp_part = result_text.split("[관련 기업]")[1].split("[본문 내용]")[0].strip()
+            # 콤마 기준으로 분리 후 공백 제거
+            companies = [c.strip() for c in comp_part.split(",") if c.strip()]
+        except Exception:
+            pass
 
     body_text = result_text.strip()
-    return importance, body_text
+    return importance, korean_title, body_text, companies
 
 
 def create_notion_page(
-    title, importance, source, link, date_str, body_text
+    korean_title, importance, source, link, date_str, body_text, companies
 ):
-    """노션 데이터베이스에 페이지 생성"""
-    notion.pages.create(
-        parent={"database_id": DATABASE_ID},
-        properties={
-            "날짜": {"date": {"start": date_str}},
-            "제목": {
-                "title": [
-                    {"text": {"content": f"[{importance}] {title}"}}
-                ]
-            },
-            "출처": {"select": {"name": source}},
-            "URL": {"url": link},
+    """노션 데이터베이스에 페이지 생성 (관련 기업 멀티셀렉트/셀렉트 태그 자동 주입)"""
+    
+    # 노션 속성 구조 세팅
+    properties = {
+        "날짜": {"date": {"start": date_str}},
+        "제목": {
+            "title": [
+                {"text": {"content": f"[{importance}] {korean_title}"}}
+            ]
         },
-        children=[
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [
-                        {
-                            "type": "text",
-                            "text": {"content": body_text[:2000]},
-                        }
-                    ]
-                },
-            }
-        ],
-    )
+        "출처": {"select": {"name": source}},
+        "URL": {"url": link},
+    }
+
+    # 관련 기업 태그 추가 (노션 DB 속성이 'multi_select' 또는 'select'일 경우 모두 대응)
+    if companies:
+        # 멀티셀렉트 형태인 경우
+        properties["관련 기업"] = [{"name": comp} for comp in companies]
+
+    try:
+        notion.pages.create(
+            parent={"database_id": DATABASE_ID},
+            properties=properties,
+            children=[
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {"content": body_text[:2000]},
+                            }
+                        ]
+                    },
+                }
+            ],
+        )
+    except Exception as e:
+        # 만약 '관련 기업'이 multi_select가 아니라 일반 select(단일 선택)이거나 형식이 다를 경우를 대비한 예외 처리
+        if "multi_select" in str(e) and companies:
+            properties["관련 기업"] = {"name": companies[0]}
+            notion.pages.create(
+                parent={"database_id": DATABASE_ID},
+                properties=properties,
+                children=[
+                    {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [
+                                {
+                                    "type": "text",
+                                    "text": {"content": body_text[:2000]},
+                                }
+                            ]
+                        },
+                    }
+                ],
+            )
+        else:
+            raise e
 
 
 def main():
@@ -219,7 +274,7 @@ def main():
             continue
 
         print(f"\n[{idx}/{len(articles)}] 반도체 하드코어 심층 AI 분석 중: {article['title']}")
-        importance, body_text = analyze_with_llm(
+        importance, korean_title, body_text, companies = analyze_with_llm(
             article["title"], article["content"], article["source"]
         )
 
@@ -227,14 +282,15 @@ def main():
             print(f"⏩ [스킵 - 중요도 '하'] {article['title']}")
             continue
 
-        print(f"✅ [업로드 내역 - 중요도 '{importance}'] 노션 등록 중...")
+        print(f"✅ [업로드 내역 - 중요도 '{importance}'] 노션 등록 중 (기업: {companies})...")
         create_notion_page(
-            article["title"],
+            korean_title,
             importance,
             article["source"],
             article["link"],
             article["date"],
             body_text,
+            companies,
         )
 
     print("\n🎉 모든 심층 분석 작업이 완료되었습니다!")
