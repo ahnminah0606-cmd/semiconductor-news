@@ -53,6 +53,23 @@ def fetch_past_24h_articles():
     return articles
 
 
+def check_url_exists(link):
+    """노션 DB에 이미 동일한 URL이 존재하는지 확인 (중복 방지)"""
+    try:
+        response = notion.databases.query(
+            database_id=DATABASE_ID,
+            filter={
+                "property": "URL",
+                "url": {
+                    "equals": link
+                }
+            }
+        )
+        return len(response["results"]) > 0
+    except Exception:
+        return False
+
+
 def analyze_with_llm(title, content, source_name):
     """토큰 절약을 위해 핵심 요약 위주로 OpenAI API 분석"""
     system_prompt = (
@@ -60,7 +77,6 @@ def analyze_with_llm(title, content, source_name):
         "기사에서 핵심 내용만 압축해서 간결하게 요약해줘."
     )
 
-    # 토큰 낭비를 줄이기 위해 본문은 앞의 1500자만 잘라서 전달
     truncated_content = content[:1500] if content else ""
 
     user_prompt = f"""
@@ -96,12 +112,11 @@ def analyze_with_llm(title, content, source_name):
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.3,
-        max_tokens=600,  # 토큰 낭비 방지를 위해 출력 제한
+        max_tokens=600,
     )
 
     result_text = response.choices[0].message.content
 
-    # 중요도 추출
     importance = "중"
     if "[중요도]" in result_text:
         try:
@@ -122,7 +137,6 @@ def analyze_with_llm(title, content, source_name):
     if importance == "하":
         return "SKIP", [], ""
 
-    # 기업 태그 및 핵심 요약 본문 파싱
     companies = []
     body_text = result_text
 
@@ -142,7 +156,7 @@ def analyze_with_llm(title, content, source_name):
 def create_notion_page(
     title, importance, source, link, date_str, companies, body_text
 ):
-    """노션 데이터베이스에 페이지 생성 (지정한 속성 순서 및 이름 반영)"""
+    """노션 데이터베이스에 페이지 생성"""
     multi_select_companies = [
         {"name": comp.replace(",", "")} for comp in companies[:5]
     ] if companies else []
@@ -150,19 +164,14 @@ def create_notion_page(
     notion.pages.create(
         parent={"database_id": DATABASE_ID},
         properties={
-            # 1. 날짜 (Date 열)
             "날짜": {"date": {"start": date_str}},
-            # 2. 제목 (Title 열 - 중요도 포함)
             "제목": {
                 "title": [
                     {"text": {"content": f"[{importance}] {title}"}}
                 ]
             },
-            # 3. 관련 기업 (Multi-select 열)
             "관련 기업": {"multi_select": multi_select_companies},
-            # 4. 출처 (Select 열)
             "출처": {"select": {"name": source}},
-            # 5. URL (URL 열)
             "URL": {"url": link},
         },
         children=[
@@ -188,6 +197,11 @@ def main():
     print(f"📰 수집된 총 기사 수: {len(articles)}개")
 
     for idx, article in enumerate(articles, 1):
+        # 이미 노션에 등록된 URL인지 중복 체크
+        if check_url_exists(article["link"]):
+            print(f"⏩ [중복 스킵] 이미 등록된 기사: {article['title']}")
+            continue
+
         print(f"\n[{idx}/{len(articles)}] AI 분석 진행 중: {article['title']}")
         importance, companies, body_text = analyze_with_llm(
             article["title"], article["content"], article["source"]
@@ -210,8 +224,6 @@ def main():
 
     print("\n🎉 모든 작업이 완료되었습니다!")
 
-
-if __name__ == "__main(("}
 
 if __name__ == "__main__":
     main()
