@@ -15,7 +15,7 @@ DATABASE_ID = os.environ.get("DATABASE_ID")
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 notion = Client(auth=NOTION_TOKEN)
 
-# 수집할 RSS 피드 및 매체 정보 (EE Times, SemiAnalysis, Tom's Hardware)
+# 수집할 RSS 피드 및 매체 정보
 FEEDS = [
     {"name": "EE Times", "url": "https://www.eetimes.com/feed/"},
     {"name": "SemiAnalysis", "url": "https://www.semianalysis.com/feed"},
@@ -42,10 +42,10 @@ def fetch_past_24h_articles():
             if published_parsed:
                 pub_dt = datetime.datetime(*published_parsed[:6], tzinfo=datetime.timezone.utc)
                 if pub_dt >= twenty_four_hours_ago:
-                    # 간단 본문 추출
-                    summary_html = entry.get("summary", "")
+                    # summary 또는 description 태그 유연하게 파싱
+                    summary_html = entry.get("summary") or entry.get("description") or ""
                     soup = BeautifulSoup(summary_html, "html.parser")
-                    text_content = soup.get_text()
+                    text_content = soup.get_text().strip()
 
                     articles.append({
                         "title": entry.title,
@@ -99,6 +99,7 @@ def analyze_with_llm(title, content, source_name):
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.3,
+        max_tokens=1500,
     )
 
     result_text = response.choices[0].message.content
@@ -137,7 +138,8 @@ def analyze_with_llm(title, content, source_name):
         body_text = parts[1].strip()
 
         raw_companies = company_part.split(",")
-        companies = [c.strip() for c in raw_companies if c.strip()]
+        # 글자 수 제한 및 공백 제거 방어 로직
+        companies = [c.strip()[:50] for c in raw_companies if c.strip()]
 
     return importance, companies, body_text
 
@@ -146,19 +148,27 @@ def create_notion_page(
     title, importance, source, link, date_str, companies, body_text
 ):
     """노션 데이터베이스에 페이지 생성"""
-    multi_select_companies = [{"name": comp} for comp in companies[:5]]
+    # 관련 기업 태그 목록 생성 (최대 5개, 노션 문자열 제한 대응)
+    multi_select_companies = [
+        {"name": comp.replace(",", "")} for comp in companies[:5]
+    ] if companies else []
 
     notion.pages.create(
         parent={"database_id": DATABASE_ID},
         properties={
+            # 1. 기사 제목 (노션 표의 Title 열 이름: '이름')
             "이름": {
                 "title": [
                     {"text": {"content": f"[{importance}] {title}"}}
                 ]
             },
+            # 2. 출처 (Select 열)
             "출처": {"select": {"name": source}},
+            # 3. 날짜 (Date 열)
             "날짜": {"date": {"start": date_str}},
+            # 4. 관련 기업 (Multi-select 열)
             "관련 기업": {"multi_select": multi_select_companies},
+            # 5. URL (URL 열)
             "URL": {"url": link},
         },
         children=[
@@ -170,7 +180,7 @@ def create_notion_page(
                         {
                             "type": "text",
                             "text": {"content": body_text[:1800]},
-                        }  # 글자수 제한 대응
+                        }  # 노션 글자수 제한 대응 (1,800자)
                     ]
                 },
             }
