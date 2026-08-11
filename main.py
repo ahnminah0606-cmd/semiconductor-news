@@ -79,6 +79,8 @@ def analyze_with_llm(title, content, source_name):
 
     truncated_content = content[:1500] if content else ""
 
+    # 파이썬 코드에서 '관련 기업' 태그 자동 파싱 부분은 제거하고,
+    # 노션 자체의 AI 자동 채우기 기능에 맡기기 위해 기업 필드 파싱 로직을 간소화했습니다.
     user_prompt = f"""
 다음 반도체 기사를 분석해줘.
 
@@ -95,9 +97,6 @@ def analyze_with_llm(title, content, source_name):
 
 [중요도]
 (상, 중, 하 중 하나)
-
-[관련 기업 및 분야]
-(콤마로 구분하여 기업명 나열)
 
 [본문 내용]
 1. 기사 요약: (3줄 이내 핵심 요약)
@@ -122,7 +121,7 @@ def analyze_with_llm(title, content, source_name):
         try:
             imp_part = (
                 result_text.split("[중요도]")[1]
-                .split("[관련 기업 및 분야]")[0]
+                .split("[본문 내용]")[0]
                 .strip()
             )
             if "상" in imp_part:
@@ -135,32 +134,16 @@ def analyze_with_llm(title, content, source_name):
             pass
 
     if importance == "하":
-        return "SKIP", [], ""
+        return "SKIP", ""
 
-    companies = []
-    body_text = result_text
-
-    if "[관련 기업 및 분야]" in result_text and "[본문 내용]" in result_text:
-        parts = result_text.split("[본문 내용]")
-        company_part = (
-            parts[0].split("[관련 기업 및 분야]")[1].replace("-", "").strip()
-        )
-        body_text = parts[1].strip()
-
-        raw_companies = company_part.split(",")
-        companies = [c.strip()[:50] for c in raw_companies if c.strip()]
-
-    return importance, companies, body_text
+    body_text = result_text.strip()
+    return importance, body_text
 
 
 def create_notion_page(
-    title, importance, source, link, date_str, companies, body_text
+    title, importance, source, link, date_str, body_text
 ):
-    """노션 데이터베이스에 페이지 생성"""
-    multi_select_companies = [
-        {"name": comp.replace(",", "")} for comp in companies[:5]
-    ] if companies else []
-
+    """노션 데이터베이스에 페이지 생성 (기업 태그는 노션 AI 자동 채우기에 위임)"""
     notion.pages.create(
         parent={"database_id": DATABASE_ID},
         properties={
@@ -170,7 +153,6 @@ def create_notion_page(
                     {"text": {"content": f"[{importance}] {title}"}}
                 ]
             },
-            "관련 기업": {"multi_select": multi_select_companies},
             "출처": {"select": {"name": source}},
             "URL": {"url": link},
         },
@@ -203,7 +185,7 @@ def main():
             continue
 
         print(f"\n[{idx}/{len(articles)}] AI 분석 진행 중: {article['title']}")
-        importance, companies, body_text = analyze_with_llm(
+        importance, body_text = analyze_with_llm(
             article["title"], article["content"], article["source"]
         )
 
@@ -218,7 +200,6 @@ def main():
             article["source"],
             article["link"],
             article["date"],
-            companies,
             body_text,
         )
 
