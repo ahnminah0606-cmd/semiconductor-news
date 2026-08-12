@@ -1,5 +1,3 @@
-# semiconductor-news
-
 # 🚀 Semiconductor Tech News AI Automation System
 
 반도체 공정·소자·패키징 분야 취업 준비생을 위한 **AI 기반 글로벌 반도체 기술 뉴스 자동 수집 및 심층 분석 시스템**입니다. 매일 주요 외신(EE Times, SemiAnalysis, Tom's Hardware 등)의 최신 기술 기사를 자동으로 크롤링하고, 현직 엔지니어 관점의 하드코어한 공학적 심층 분석을 거쳐 노션(Notion) 데이터베이스에 체계적으로 아카이빙합니다.
