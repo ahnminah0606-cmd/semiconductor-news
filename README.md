@@ -2,6 +2,8 @@
 
 반도체 공정·소자·패키징 분야 취업 준비생을 위한 **AI 기반 글로벌 반도체 기술 뉴스 자동 수집 및 심층 분석 시스템**입니다. 매일 주요 외신(EE Times, SemiAnalysis, Tom's Hardware 등)의 최신 기술 기사를 자동으로 크롤링하고, 현직 엔지니어 관점의 하드코어한 공학적 심층 분석을 거쳐 노션(Notion) 데이터베이스에 체계적으로 아카이빙합니다.
 
+[![✨ 노션 페이지 바로가기](https://img.shields.io/badge/Notion-아카이브_저장소-000000?style=for-the-badge&logo=notion&logoColor=white)](https://app.notion.com/p/3b992822e109804a8236c681f8a5ef0f?v=3b992822e10980ff8f99000c5e271a8d&p=3b992822e10981828f1eef405e710477&pm=s)
+
 ---
 
 ## 📌 프로젝트 개발 및 개선 여정 (Evolution)
