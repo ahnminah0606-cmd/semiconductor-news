@@ -414,18 +414,44 @@ def create_notion_page(
     """노션 API 호출 (2000자 초과 본문 분할 처리 추가)"""
     properties = {
         "제목": {
-            "title": [{"text": {"content": f"[{importance}] {korean_title}"}}]
+            "title": [
+                {
+                    "text": {
+                        "content": f"[{importance}] {korean_title}"
+                    }
+                }
+            ]
         },
-        "출처": {"select": {"name": source}},
-        "URL": {"url": link},
+        "출처": {
+            "select": {
+                "name": source
+            }
+        },
+        "URL": {
+            "url": link
+        }
     }
 
+    # 날짜
     if date_str:
-        properties["날짜"] = {"date": {"start": date_str}}
+        print("날짜 =", date_str)
+        properties["날짜"] = {
+            "date": {
+                "start": str(date_str)
+            }
+        }
 
-    # 검증된 기업 태그만 노션 다중 선택으로 전달
+    # 관련 기업
     if companies:
-        properties["관련 기업"] = [{"name": comp} for comp in companies]
+        properties["관련 기업"] = {
+            "multi_select": [
+                {"name": comp}
+                for comp in companies
+            ]
+        }
+
+    import json
+    print(json.dumps(properties, ensure_ascii=False, indent=2))
 
     # 심층 분석 본문 길이가 길어질 경우를 대비한 2000자 단위 분할 블록 생성
     content_blocks = []
@@ -439,15 +465,21 @@ def create_notion_page(
             },
         })
 
-    try:
-        notion.pages.create(
-            parent={"database_id": DATABASE_ID},
-            properties=properties,
-            children=content_blocks,
-        )
-    except Exception as e:
-        print(f"❌ 노션 등록 실패: {e}")
-        raise e
+    import json
+
+try:
+    print("====== Notion Properties ======")
+    print(json.dumps(properties, ensure_ascii=False, indent=2))
+
+    notion.pages.create(
+        parent={"database_id": DATABASE_ID},
+        properties=properties,
+        children=content_blocks,
+    )
+
+except Exception as e:
+    print(f"❌ 노션 등록 실패: {e}")
+    raise e
 
 
 def main():
