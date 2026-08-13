@@ -13,19 +13,137 @@ DATABASE_ID = os.environ.get("DATABASE_ID")
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 notion = Client(auth=NOTION_TOKEN)
 
-# 수집할 RSS 피드 및 매체 정보
+# 노션 다중 선택(Multi-select)에 사전에 등록된 공식 기업 목록
+ALLOWED_COMPANIES = [
+    "한미반도체", "삼성전자", "SK하이닉스", "HPSP", "리노공업", "동진쎄미켐", 
+    "주성엔지니어링", "원익IPS", "솔브레인", "하나마이크론", "DB하이텍", "TSMC", 
+    "ASML", "어플라이드 머티리얼즈(AMAT)", "램리서치(LRCX)", "엔비디아(NVIDIA)", "AMD", 
+    "퀄컴(QCOM)", "브로드컴(AVGO)", "앤트로픽(Anthropic)", "애플(AAPL)", "인텔(INTC)", 
+    "샌디스크(SanDisk)", "웨스턴디지털(WDC)", "마이크론(MU)", "키옥시아(Kioxia)", 
+    "솔리다임(Solidigm)", "시놉시스(SNPS)", "케이던스(CDNS)", "ARM", "글로벌파운드리스(GFS)", 
+    "에이디테크놀로지", "가온칩스", "에이직랜드", "코아시아", "ASE", "암코(Amkor)", 
+    "JCET", "두산테스나", "SFA반도체", "네페스", "LB세미콘", "에이팩트", "도쿄일렉트론(TEL)", 
+    "KLA", "ISC", "티씨케이", "LX세미콘", "스크린(Screen)", "히타치 하이테크(Hitachi High-Tech)", 
+    "큐니티(Qnity)", "머크(Merck)", "레조낙(Resonac)", "신에츠(Shin-Etsu)", "니콘(Nikon)", 
+    "캐논(Canon)", "디스코(DISCO)", "텔레칩스", "칩스앤미디어", "어보브반도체", "제주반도체", 
+    "앤씨앤", "서진시스템", "에스앤에스텍", "에프에스티", "유진테크", "넥스틴", "피에스케이", 
+    "이오테크닉스", "하나머티리얼즈", "싸이맥스", "코미코", "ST마이크로일렉트로닉스(STM)", 
+    "인피니온(IFX)", "NXP", "엠코어", "덴소(DENSO)", "도쿄오카공업(TOK)", "니폰산소(Nippon Sanso)", 
+    "어드반테스트(Advantest)", "온세미(ON)", "테라다인(TER)", "시러스로직(CRUS)", "마벨(MRVL)", "소이텍(Soitec)",
+    "텍사스 인스트루먼트(TXN)"
+]
+
+COMPANY_ALIASES = {
+    # 한국
+    "삼성": "삼성전자",
+    "삼성전자": "삼성전자",
+    "SK hynix": "SK하이닉스",
+    "SK Hynix": "SK하이닉스",
+    "SK하이닉스": "SK하이닉스",
+
+    # NVIDIA
+    "NVIDIA": "엔비디아(NVIDIA)",
+    "Nvidia": "엔비디아(NVIDIA)",
+    "엔비디아": "엔비디아(NVIDIA)",
+
+    # Intel
+    "Intel": "인텔(INTC)",
+    "INTEL": "인텔(INTC)",
+    "인텔": "인텔(INTC)",
+
+    # AMD
+    "AMD": "AMD",
+
+    # Qualcomm
+    "Qualcomm": "퀄컴(QCOM)",
+    "QUALCOMM": "퀄컴(QCOM)",
+    "퀄컴": "퀄컴(QCOM)",
+
+    # Apple
+    "Apple": "애플(AAPL)",
+    "APPLE": "애플(AAPL)",
+    "애플": "애플(AAPL)",
+
+    # Broadcom
+    "Broadcom": "브로드컴(AVGO)",
+    "브로드컴": "브로드컴(AVGO)",
+
+    # Micron
+    "Micron": "마이크론(MU)",
+    "마이크론": "마이크론(MU)",
+
+    # TSMC
+    "TSMC": "TSMC",
+    "Taiwan Semiconductor": "TSMC",
+
+    # ASML
+    "ASML": "ASML",
+
+    # Lam Research
+    "Lam Research": "램리서치(LRCX)",
+    "램리서치": "램리서치(LRCX)",
+
+    # Applied Materials
+    "Applied Materials": "어플라이드 머티리얼즈(AMAT)",
+    "AMAT": "어플라이드 머티리얼즈(AMAT)",
+
+    # TEL
+    "Tokyo Electron": "도쿄일렉트론(TEL)",
+    "TEL": "도쿄일렉트론(TEL)",
+    "도쿄일렉트론": "도쿄일렉트론(TEL)",
+
+    # KLA
+    "KLA": "KLA",
+
+    # Synopsys
+    "Synopsys": "시놉시스(SNPS)",
+    "시놉시스": "시놉시스(SNPS)",
+
+    # Cadence
+    "Cadence": "케이던스(CDNS)",
+    "케이던스": "케이던스(CDNS)",
+
+    # ARM
+    "ARM": "ARM",
+
+    # GlobalFoundries
+    "GlobalFoundries": "글로벌파운드리스(GFS)",
+    "글로벌파운드리스": "글로벌파운드리스(GFS)",
+
+    # Texas Instruments
+    "Texas Instruments": "텍사스 인스트루먼트(TXN)",
+    "TI": "텍사스 인스트루먼트(TXN)",
+    "텍사스 인스트루먼트": "텍사스 인스트루먼트(TXN)",
+}
+
+
+def normalize_companies(raw_companies):
+    result = []
+
+    for company in raw_companies:
+        company = company.strip()
+
+        if company in ALLOWED_COMPANIES:
+            result.append(company)
+            continue
+
+        if company in COMPANY_ALIASES:
+            mapped = COMPANY_ALIASES[company]
+            if mapped in ALLOWED_COMPANIES:
+                result.append(mapped)
+
+    return list(dict.fromkeys(result))
+
+
 FEEDS = [
     {"name": "EE Times", "url": "https://www.eetimes.com/feed/"},
     {"name": "SemiAnalysis", "url": "https://www.semianalysis.com/feed"},
-    {
-        "name": "Tom's Hardware",
-        "url": "https://www.tomshardware.com/feeds/all",
-    },
+    {"name": "Tom's Hardware", "url": "https://www.tomshardware.com/feeds/all"},
 ]
 
 
 def fetch_full_article_content(url):
-    """기사 본문 전체를 누락 없이 스크래핑"""
+    """기사 본문 스크래핑"""
     try:
         import requests
         headers = {
@@ -34,31 +152,24 @@ def fetch_full_article_content(url):
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
-            
             for element in soup(["script", "style", "nav", "footer", "header", "aside", "form"]):
                 element.decompose()
-                
             article_body = (
                 soup.find("div", class_="entry-content") or 
                 soup.find("div", class_="post-content") or 
                 soup.find("article") or
                 soup.find("div", class_="article-body")
             )
-            
-            if article_body:
-                paragraphs = article_body.find_all(["p", "h2", "h3", "li"])
-            else:
-                paragraphs = soup.find_all("p")
-                
+            paragraphs = article_body.find_all(["p", "h2", "h3", "li"]) if article_body else soup.find_all("p")
             full_text = "\n".join([p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 20])
             return full_text.strip()
     except Exception as e:
-        print(f"⚠️ 스크래핑 중 오류 발생 ({url}): {e}")
+        print(f"⚠️ 스크래핑 오류 ({url}): {e}")
     return ""
 
 
 def fetch_past_24h_articles():
-    """전날 06:00부터 금일 05:59까지 수집 및 본문 크롤링 수행"""
+    """지난 24시간 기사 수집"""
     articles = []
     now = datetime.datetime.now(datetime.timezone.utc)
     twenty_four_hours_ago = now - datetime.timedelta(hours=24)
@@ -66,18 +177,14 @@ def fetch_past_24h_articles():
     for feed_info in FEEDS:
         feed = feedparser.parse(feed_info["url"])
         for entry in feed.entries:
-            published_parsed = entry.get("published_parsed") or entry.get(
-                "updated_parsed"
-            )
+            published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
             if published_parsed:
                 pub_dt = datetime.datetime(*published_parsed[:6], tzinfo=datetime.timezone.utc)
                 if pub_dt >= twenty_four_hours_ago:
                     full_content = fetch_full_article_content(entry.link)
-                    
                     if not full_content or len(full_content) < 200:
                         summary_html = entry.get("summary") or entry.get("description") or ""
-                        soup = BeautifulSoup(summary_html, "html.parser")
-                        full_content = soup.get_text().strip()
+                        full_content = BeautifulSoup(summary_html, "html.parser").get_text().strip()
 
                     articles.append({
                         "title": entry.title,
@@ -90,16 +197,11 @@ def fetch_past_24h_articles():
 
 
 def check_url_exists(link):
-    """노션 DB에 이미 동일한 URL이 존재하는지 확인 (중복 방지)"""
+    """중복 확인"""
     try:
         response = notion.databases.query(
             database_id=DATABASE_ID,
-            filter={
-                "property": "URL",
-                "url": {
-                    "equals": link
-                }
-            }
+            filter={"property": "URL", "url": {"equals": link}}
         )
         return len(response["results"]) > 0
     except Exception:
@@ -107,42 +209,152 @@ def check_url_exists(link):
 
 
 def analyze_with_llm(title, content, source_name):
-    """반도체 소자/공정/패키징 하드코어 전문 분석 및 한글 제목/기업 파싱"""
+    """요청된 수석 엔지니어 전용 시스템 및 유저 프롬프트 적용"""
     system_prompt = (
-        "너는 글로벌 반도체 선도 기업(삼성전자, SK하이닉스, TSMC 등)의 공정/소자/패키징 15년 차 수석 엔지니어이자, "
-        "취업 준비생의 밀착 커리어 멘토야. 뜬구름 잡는 일반적인 설명이나 교과서적인 내용은 절대 배제하고, "
-        "실무 현장 및 학회(IEDM, ISSCC) 수준의 깊이 있고 날카로운 전문 공학 용어와 물리적 메커니즘을 바탕으로 분석해야 해."
+        "너는 삼성전자와 SK하이닉스에서 15년 이상 근무한 공정·소자·패키징 수석 엔지니어이며, "
+        "TSMC, Intel, NVIDIA, ASML의 최신 기술 동향까지 분석하는 반도체 기술 전문가다. "
+        "기사를 단순 요약하지 말고 기술적 원리, 공정, 장비, 소재, 경쟁 기술과의 차이, 산업적 의미를 깊이 있게 설명하라. "
+        "답변은 현직 엔지니어 교육자료 수준으로 작성하며, 추상적인 표현 대신 구체적인 기술 내용을 포함한다."
     )
-
     truncated_content = content[:6000] if content else ""
 
     user_prompt = f"""
-다음 반도체 기술 기사를 분석하여 요구사항에 맞춰 응답해줘.
+다음 반도체 기술 기사를 분석해줘.
 
 출처: {source_name}
 원문 제목: {title}
-본문: {truncated_content}
 
-[중요도 기준]
-- 상: HBM, High-NA EUV, 3D 패키징(Hybrid Bonding 등), GAA/CFET 등 핵심 공정/소자 기술 혁신 및 한계 돌파
-- 중: 주요 기업 CapEx, 파운드리 미세공정 수율 경쟁, 공급망 및 소부장 국산화/생태계 변화
-- 하: 단순 실적, 주가 변동, 일반 IT 가젯 리뷰
+본문:
+{truncated_content}
 
-아래 형식을 정확히 지켜서 작성해줘:
+==========================
+[중요도 평가 기준]
+==========================
+
+■ 상
+- HBM
+- High-NA EUV
+- EUV
+- GAA
+- CFET
+- Backside Power Delivery
+- Chiplet
+- 3D 패키징
+- Hybrid Bonding
+- CoWoS
+- 차세대 메모리
+- 첨단 공정
+- AI 반도체 핵심 기술
+- 반도체 산업의 패러다임 변화
+
+■ 중
+- 기업 투자(CapEx)
+- 파운드리 경쟁
+- 수율 개선
+- 공급망 변화
+- 생산라인 증설
+- 신규 고객 확보
+- 장비·소재 기술
+- 후공정 기술
+- 자동차 반도체
+- 산업 동향
+
+■ 하
+- 단순 실적 발표
+- 주가 변동
+- 일반 IT 제품 리뷰
+- 소비자 전자제품
+- 게임
+- 루머성 기사
+
+==========================
+[기업 추출]
+==========================
+
+기사에서 언급된 반도체 관련 기업만 추출해.
+
+규칙
+
+- 영어 또는 한국어 모두 가능
+- 일반적으로 많이 사용하는 이름 사용
+- 쉼표(,)로 구분
+- 최대 10개
+- 기사에 없는 기업은 쓰지 말 것
+- 없으면 빈칸
+
+예시
+
+Intel
+NVIDIA
+Apple
+TSMC
+AMD
+ASML
+Lam Research
+삼성전자
+SK hynix
+Qualcomm
+
+==========================
+[응답 형식]
+==========================
 
 [한글 제목]
-(원문 제목을 반도체 전문 용어를 살려 자연스럽고 직관적인 한국어 제목으로 번역)
+
+자연스럽고 직관적인 한국어 제목
 
 [중요도]
-(상, 중, 하 중 하나)
+
+상 / 중 / 하
 
 [관련 기업]
-(기사에 언급된 주요 반도체 관련 기업들을 콤마로 구분하여 나열할 것. 예: 삼성전자, SK하이닉스, TSMC, Intel, NVIDIA, AMD, ASML 등)
+
+회사1, 회사2, 회사3
 
 [본문 내용]
-1. 기술 심층 분석: (기사에 언급된 기술이 기존 레거시 공정/아키텍처 대비 물리적·구조적으로 무엇이 혁신적으로 다른지 상세히 분석할 것. 공정 한계(RC 딜레이, 숏채널 효과, 열팽창계수Mismatch 등), 수율(Yield) 향상 요인, 재료적 특성 변화 등 공학적 원리를 포함하여 최소 6~7문장 이상으로 매우 깊이 있게 서술)
-2. 반도체 직무 시사점: (공정/소자/설비/패키징 엔지니어 관점에서 이 트렌드가 실무 현장에 미치는 파급효과와 직무 수행 시 직면할 핵심 병목(Bottleneck) 및 트러블슈팅 포인트를 짚어줄 것. 면접관에게 전문성을 어필할 수 있는 수준으로 최소 4~5문장 이상 구체적으로 작성)
-3. 핵심 전문 키워드: (일반적인 단어 금지. 반도체 세부 공정, 소자 물리, 패키징 전문 용어 위주로 콤마로 구분하여 5개 이상 작성)
+
+1. 기술 심층 분석
+
+다음 내용을 반드시 포함하여 10문장 이상 작성한다.
+
+- 핵심 기술의 원리
+- 기존 기술 대비 차이점
+- 왜 필요한 기술인지
+- 어떤 공정(Process)에서 사용되는지
+- 사용되는 장비 또는 소재
+- 기술적 난이도와 해결 과제
+- 경쟁사 기술과의 차이
+- 반도체 산업에 미치는 영향
+- 앞으로의 발전 방향
+
+단순 기사 요약이 아니라
+현직 삼성전자·SK하이닉스 공정기술/소자/장비 엔지니어 교육자료 수준으로 작성한다.
+
+2. 반도체 직무 시사점
+
+다음 내용을 반드시 포함하여 6문장 이상 작성한다.
+
+- 공정기술 직무
+- 장비기술 직무
+- 소자 직무
+- 패키징 직무
+- 면접에서 나올 수 있는 질문
+- 취업 준비 시 알아야 할 핵심 내용
+
+3. 핵심 전문 키워드
+
+최소 8개 이상 작성한다.
+
+예시
+
+HBM
+CoWoS
+High-NA EUV
+Chiplet
+Hybrid Bonding
+GAA
+CFET
+TSV
 """
 
     response = openai_client.chat.completions.create(
@@ -151,13 +363,13 @@ def analyze_with_llm(title, content, source_name):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.3,
-        max_tokens=1500,
+        temperature=0.2,
+        max_tokens=2500,
     )
 
     result_text = response.choices[0].message.content
 
-    # 1. 한글 제목 파싱
+    # 한글 제목 파싱
     korean_title = title
     if "[한글 제목]" in result_text and "[중요도]" in result_text:
         try:
@@ -165,7 +377,7 @@ def analyze_with_llm(title, content, source_name):
         except Exception:
             pass
 
-    # 2. 중요도 파싱
+    # 중요도 파싱
     importance = "중"
     if "[중요도]" in result_text:
         try:
@@ -182,98 +394,73 @@ def analyze_with_llm(title, content, source_name):
     if importance == "하":
         return "SKIP", "", "", []
 
-    # 3. 관련 기업 파싱
-    companies = []
+    # 관련 기업 검증 및 정규화 (파이썬 코드 단에서 2차 매핑 적용)
+    matched_companies = []
     if "[관련 기업]" in result_text:
         try:
             comp_part = result_text.split("[관련 기업]")[1].split("[본문 내용]")[0].strip()
-            # 콤마 기준으로 분리 후 공백 제거
-            companies = [c.strip() for c in comp_part.split(",") if c.strip()]
+            raw_companies = [c.strip() for c in comp_part.split(",") if c.strip()]
+            matched_companies = normalize_companies(raw_companies)
         except Exception:
             pass
 
     body_text = result_text.strip()
-    return importance, korean_title, body_text, companies
+    return importance, korean_title, body_text, matched_companies
 
 
 def create_notion_page(
     korean_title, importance, source, link, date_str, body_text, companies
 ):
-    """노션 데이터베이스에 페이지 생성 (관련 기업 멀티셀렉트/셀렉트 태그 자동 주입)"""
-    
-    # 노션 속성 구조 세팅
+    """노션 API 호출 (2000자 초과 본문 분할 처리 추가)"""
     properties = {
-        "날짜": {"date": {"start": date_str}},
         "제목": {
-            "title": [
-                {"text": {"content": f"[{importance}] {korean_title}"}}
-            ]
+            "title": [{"text": {"content": f"[{importance}] {korean_title}"}}]
         },
         "출처": {"select": {"name": source}},
         "URL": {"url": link},
     }
 
-    # 관련 기업 태그 추가 (노션 DB 속성이 'multi_select' 또는 'select'일 경우 모두 대응)
+    if date_str:
+        properties["날짜"] = {"date": {"start": date_str}}
+
+    # 검증된 기업 태그만 노션 다중 선택으로 전달
     if companies:
-        # 멀티셀렉트 형태인 경우
         properties["관련 기업"] = [{"name": comp} for comp in companies]
+
+    # 심층 분석 본문 길이가 길어질 경우를 대비한 2000자 단위 분할 블록 생성
+    content_blocks = []
+    chunks = [body_text[i:i+1900] for i in range(0, len(body_text), 1900)]
+    for chunk in chunks:
+        content_blocks.append({
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [{"type": "text", "text": {"content": chunk}}]
+            },
+        })
 
     try:
         notion.pages.create(
             parent={"database_id": DATABASE_ID},
             properties=properties,
-            children=[
-                {
-                    "object": "block",
-                    "type": "paragraph",
-                    "paragraph": {
-                        "rich_text": [
-                            {
-                                "type": "text",
-                                "text": {"content": body_text[:2000]},
-                            }
-                        ]
-                    },
-                }
-            ],
+            children=content_blocks,
         )
     except Exception as e:
-        # 만약 '관련 기업'이 multi_select가 아니라 일반 select(단일 선택)이거나 형식이 다를 경우를 대비한 예외 처리
-        if "multi_select" in str(e) and companies:
-            properties["관련 기업"] = {"name": companies[0]}
-            notion.pages.create(
-                parent={"database_id": DATABASE_ID},
-                properties=properties,
-                children=[
-                    {
-                        "object": "block",
-                        "type": "paragraph",
-                        "paragraph": {
-                            "rich_text": [
-                                {
-                                    "type": "text",
-                                    "text": {"content": body_text[:2000]},
-                                }
-                            ]
-                        },
-                    }
-                ],
-            )
-        else:
-            raise e
+        print(f"❌ 노션 등록 실패: {e}")
+        raise e
 
 
 def main():
-    print("🔍 24시간 내 수집된 기사 탐색 및 본문 정밀 스크래핑 중...")
+    print("🔍 기사 수집 시작...")
     articles = fetch_past_24h_articles()
     print(f"📰 수집된 총 기사 수: {len(articles)}개")
 
     for idx, article in enumerate(articles, 1):
         if check_url_exists(article["link"]):
-            print(f"⏩ [중복 스킵] 이미 등록된 기사: {article['title']}")
+            print(f"⏩ [중복 스킵] {article['title']}")
             continue
 
-        print(f"\n[{idx}/{len(articles)}] 반도체 하드코어 심층 AI 분석 중: {article['title']}")
+        print(f"\n[{idx}/{len(articles)}] 분석 중: {article['title']}")
         importance, korean_title, body_text, companies = analyze_with_llm(
             article["title"], article["content"], article["source"]
         )
@@ -282,7 +469,7 @@ def main():
             print(f"⏩ [스킵 - 중요도 '하'] {article['title']}")
             continue
 
-        print(f"✅ [업로드 내역 - 중요도 '{importance}'] 노션 등록 중 (기업: {companies})...")
+        print(f"✅ [노션 등록 중] 중요도: {importance} | 매칭된 기업: {companies}")
         create_notion_page(
             korean_title,
             importance,
@@ -293,7 +480,7 @@ def main():
             companies,
         )
 
-    print("\n🎉 모든 심층 분석 작업이 완료되었습니다!")
+    print("\n🎉 모든 작업이 완료되었습니다!")
 
 
 if __name__ == "__main__":
