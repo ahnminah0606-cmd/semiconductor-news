@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import feedparser
 from bs4 import BeautifulSoup
@@ -147,7 +148,7 @@ def fetch_full_article_content(url):
     try:
         import requests
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BeautifulSoup/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
@@ -394,12 +395,17 @@ TSV
     if importance == "하":
         return "SKIP", "", "", []
 
-    # 관련 기업 검증 및 정규화 (파이썬 코드 단에서 2차 매핑 적용)
+    # 관련 기업 검증 및 정규화
     matched_companies = []
     if "[관련 기업]" in result_text:
         try:
-            comp_part = result_text.split("[관련 기업]")[1].split("[본문 내용]")[0].strip()
-            raw_companies = [c.strip() for c in comp_part.split(",") if c.strip()]
+            comp_part = result_text.split("[관련 기업]")[1]
+            if "[본문 내용]" in comp_part:
+                comp_part = comp_part.split("[본문 내용]")[0]
+            elif "1." in comp_part:
+                comp_part = comp_part.split("1.")[0]
+
+            raw_companies = [c.strip() for c in comp_part.strip().split(",") if c.strip()]
             matched_companies = normalize_companies(raw_companies)
         except Exception:
             pass
@@ -411,7 +417,8 @@ TSV
 def create_notion_page(
     korean_title, importance, source, link, date_str, body_text, companies
 ):
-    """노션 API 호출 (2000자 초과 본문 분할 처리 추가)"""
+    """노션 API 호출"""
+
     properties = {
         "제목": {
             "title": [
@@ -432,54 +439,52 @@ def create_notion_page(
         }
     }
 
-    # 날짜
     if date_str:
-        print("날짜 =", date_str)
         properties["날짜"] = {
             "date": {
                 "start": str(date_str)
             }
         }
 
-    # 관련 기업
+    # multi_select 형식 수정 완료 (올바른 리스트 전달)
     if companies:
-        properties["관련 기업"] = {
-            "multi_select": [
-                {"name": comp}
-                for comp in companies
-            ]
-        }
+        properties["관련 기업"] = [
+            {"name": comp} for comp in companies
+        ]
 
-    import json
-    print(json.dumps(properties, ensure_ascii=False, indent=2))
-
-    # 심층 분석 본문 길이가 길어질 경우를 대비한 2000자 단위 분할 블록 생성
     content_blocks = []
     chunks = [body_text[i:i+1900] for i in range(0, len(body_text), 1900)]
+
     for chunk in chunks:
         content_blocks.append({
             "object": "block",
             "type": "paragraph",
             "paragraph": {
-                "rich_text": [{"type": "text", "text": {"content": chunk}}]
+                "rich_text": [
+                    {
+                        "type": "text",
+                        "text": {
+                            "content": chunk
+                        }
+                    }
+                ]
             },
         })
 
-    import json
-
-try:
     print("====== Notion Properties ======")
     print(json.dumps(properties, ensure_ascii=False, indent=2))
 
-    notion.pages.create(
-        parent={"database_id": DATABASE_ID},
-        properties=properties,
-        children=content_blocks,
-    )
-
-except Exception as e:
-    print(f"❌ 노션 등록 실패: {e}")
-    raise e
+    try:
+        notion.pages.create(
+            parent={"database_id": DATABASE_ID},
+            properties=properties,
+            children=content_blocks,
+        )
+        print("✅ 노션 등록 완료")
+    except Exception as e:
+        print("❌ 노션 등록 실패")
+        print(e)
+        raise
 
 
 def main():
