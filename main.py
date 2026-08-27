@@ -19,6 +19,14 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 DATABASE_ID = os.environ.get("DATABASE_ID")
 
+try:
+    LOOKBACK_HOURS = int(os.environ.get("LOOKBACK_HOURS", "24"))
+except ValueError:
+    LOOKBACK_HOURS = 24
+
+# 과도한 수집과 예상치 못한 API 사용을 막기 위한 안전 범위
+LOOKBACK_HOURS = max(1, min(LOOKBACK_HOURS, 168))
+
 if not OPENAI_API_KEY or not NOTION_TOKEN or not DATABASE_ID:
     print("❌ [환경 변수 오류] OPENAI_API_KEY, NOTION_TOKEN, DATABASE_ID가 설정되어 있는지 확인하세요.")
     sys.exit(1)
@@ -270,11 +278,11 @@ def fetch_full_article_content(url):
     return ""
 
 
-def fetch_past_24h_articles():
-    """최근 24시간 동안 수집된 RSS 기사 파싱"""
+def fetch_recent_articles(lookback_hours=24):
+    """지정한 시간 범위 내 RSS 기사 파싱"""
     articles = []
     now = datetime.datetime.now(datetime.timezone.utc)
-    twenty_four_hours_ago = now - datetime.timedelta(hours=24)
+    cutoff_time = now - datetime.timedelta(hours=lookback_hours)
 
     for feed_info in FEEDS:
         try:
@@ -283,7 +291,7 @@ def fetch_past_24h_articles():
                 published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
                 if published_parsed:
                     pub_dt = datetime.datetime(*published_parsed[:6], tzinfo=datetime.timezone.utc)
-                    if pub_dt >= twenty_four_hours_ago:
+                    if pub_dt >= cutoff_time:
                         full_content = fetch_full_article_content(entry.link)
                         if not full_content or len(full_content) < 200:
                             summary_html = entry.get("summary") or entry.get("description") or ""
@@ -552,9 +560,9 @@ def create_notion_page(korean_title, importance, source, link, date_str, body_te
 # 6. 메인 실행 루프 (안전한 예외 처리 적용)
 # ==============================================================================
 def main():
-    print("🚀 [프로세스 시작] 최근 24시간 반도체 기사 수집 및 Notion 자동화...")
+    print(f"🚀 [프로세스 시작] 최근 {LOOKBACK_HOURS}시간 반도체 기사 수집 및 Notion 자동화...")
     
-    articles = fetch_past_24h_articles()
+    articles = fetch_recent_articles(LOOKBACK_HOURS)
     print(f"📰 [수집 결과] 총 {len(articles)}개의 기사가 수집되었습니다.")
 
     success_count = 0
