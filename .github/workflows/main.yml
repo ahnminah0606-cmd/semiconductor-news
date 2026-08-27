@@ -2,8 +2,9 @@ name: Semiconductor News Automation
 
 on:
   schedule:
-    # 매일 한국 시간 기준 오전 8시 실행 (UTC 23:00)
-    - cron: '0 23 * * *'
+    # 매일 한국 시간 기준 오전 8시 17분 실행 (UTC 23:17)
+    # GitHub Actions 사용량이 몰리는 정각을 피하여 예약 실행 누락 가능성을 줄임
+    - cron: '17 23 * * *'
   workflow_dispatch: # GitHub 웹 UI에서 수동 실행 버튼 활성화
 
 jobs:
@@ -22,7 +23,8 @@ jobs:
       - name: 의존성 패키지 설치
         run: |
           python -m pip install --upgrade pip
-          pip install feedparser beautifulsoup4 requests notion-client openai
+          # main.py의 databases.query API와 호환되는 Notion SDK 버전 고정
+          pip install feedparser beautifulsoup4 requests "notion-client==2.5.0" openai
 
       - name: 파이썬 자동화 스크립트 실행
         env:
