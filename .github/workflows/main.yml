@@ -2,10 +2,15 @@ name: Semiconductor News Automation
 
 on:
   schedule:
-    # 매일 한국 시간 기준 오전 8시 17분 실행 (UTC 23:17)
+    # 매일 한국 시간 기준 오전 7시 17분 실행 (UTC 22:17)
     # GitHub Actions 사용량이 몰리는 정각을 피하여 예약 실행 누락 가능성을 줄임
-    - cron: '17 23 * * *'
-  workflow_dispatch: # GitHub 웹 UI에서 수동 실행 버튼 활성화
+    - cron: '17 22 * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: '수집 범위(시간). 평소에는 24, 누락 복구 시에만 48'
+        required: false
+        default: '24'
 
 jobs:
   run-script:
@@ -31,5 +36,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
+          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '24' }}
         run: |
           python main.py
