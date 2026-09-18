@@ -246,6 +246,55 @@ FEEDS = [
     {"name": "Tom's Hardware", "url": "https://www.tomshardware.com/feeds/all"},
 ]
 
+# 제목과 RSS 설명 단계에서 반도체 직접 관련성을 먼저 판정해
+# 무관한 기사를 LLM에 보내거나 Notion에 저장하지 않는다.
+SEMICONDUCTOR_KEYWORDS = (
+    "semiconductor", "chip", "wafer", "foundry", "fab", "transistor",
+    "processor", "cpu", "gpu", "npu", "asic", "fpga", "accelerator",
+    "dram", "nand", "hbm", "ddr", "sram", "memory chip", "soc",
+    "lithography", "euv", "etch", "deposition", "cmp", "packaging",
+    "chiplet", "hybrid bonding", "interconnect", "nvlink", "silicon",
+    "die", "process node", "pcb", "capacitor", "반도체", "웨이퍼",
+    "파운드리", "공정", "패키징", "메모리", "칩렛", "노광", "식각",
+)
+
+SEMICONDUCTOR_COMPANIES = (
+    "sk hynix", "samsung electronics", "tsmc", "intel", "nvidia", "amd",
+    "micron", "asml", "qualcomm", "broadcom", "arm", "globalfoundries",
+    "applied materials", "lam research", "tokyo electron", "kla",
+    "synopsys", "cadence", "kioxia", "sandisk", "western digital",
+    "semianalysis", "sk하이닉스", "삼성전자", "엔비디아",
+)
+
+CONSUMER_OR_OFFTOPIC_PATTERNS = (
+    " review", "deal", "discount", "cheapest", "sale", "coupon",
+    "could be yours", "combo saves", "gaming laptop", "game —",
+    "minecraft", "cryptocurrency", "bitcoin", "camera hacking",
+    "3d printer", "windows xp key",
+)
+
+
+def is_relevant_semiconductor_article(title, summary=""):
+    """반도체가 기사의 중심 주제인 경우에만 True를 반환한다."""
+    title_text = f" {title.lower()} "
+    context = f"{title_text} {summary.lower()[:1200]}"
+
+    if any(pattern in title_text for pattern in CONSUMER_OR_OFFTOPIC_PATTERNS):
+        return False
+
+    if any(keyword in title_text for keyword in SEMICONDUCTOR_KEYWORDS):
+        return True
+
+    company_hits = sum(
+        company in title_text for company in SEMICONDUCTOR_COMPANIES
+    )
+    context_keyword_hits = sum(
+        keyword in context for keyword in SEMICONDUCTOR_KEYWORDS
+    )
+    return company_hits >= 2 or (
+        company_hits >= 1 and context_keyword_hits >= 1
+    )
+
 
 def fetch_full_article_content(url):
     """기사 URL로부터 본문 텍스트 스크래핑"""
@@ -273,8 +322,10 @@ def fetch_full_article_content(url):
             paragraphs = article_body.find_all(["p", "h2", "h3", "li"]) if article_body else soup.find_all("p")
             full_text = "\n".join([p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 20])
             return full_text.strip()
+    except requests.RequestException as e:
+        print(f"ℹ️ [본문 대체] 원문 접근 불가로 RSS 설명을 사용합니다. ({url}): {e}")
     except Exception as e:
-        print(f"⚠️ [스크래핑 경고] ({url}): {e}")
+        print(f"ℹ️ [본문 대체] 본문 추출 불가로 RSS 설명을 사용합니다. ({url}): {e}")
     return ""
 
 
@@ -292,10 +343,20 @@ def fetch_recent_articles(lookback_hours=24):
                 if published_parsed:
                     pub_dt = datetime.datetime(*published_parsed[:6], tzinfo=datetime.timezone.utc)
                     if pub_dt >= cutoff_time:
+                        summary_html = entry.get("summary") or entry.get("description") or ""
+                        summary_text = BeautifulSoup(
+                            summary_html, "html.parser"
+                        ).get_text(" ", strip=True)
+
+                        if not is_relevant_semiconductor_article(
+                            entry.title, summary_text
+                        ):
+                            print(f"⏩ [사전 필터] 반도체 비관련 기사 제외: {entry.title}")
+                            continue
+
                         full_content = fetch_full_article_content(entry.link)
                         if not full_content or len(full_content) < 200:
-                            summary_html = entry.get("summary") or entry.get("description") or ""
-                            full_content = BeautifulSoup(summary_html, "html.parser").get_text().strip()
+                            full_content = summary_text
 
                         articles.append({
                             "title": entry.title,
@@ -349,6 +410,16 @@ def analyze_with_llm(title, content, source_name):
 {truncated_content}
 
 ==========================
+[관련성 판정 - 가장 먼저 수행]
+==========================
+- 반도체 칩·공정·소자·장비·소재·메모리·파운드리·패키징이 기사의 중심 주제일 때만 INCLUDE
+- 일반 AI 모델·서비스, 데이터센터 지역정책, 보안 사고, 암호화폐, 드론, 게임, 소비자 제품 할인은 SKIP
+- 반도체 기업명이 단순히 한두 문장 언급된 것만으로 관련 있다고 판단하지 말 것
+- SKIP이면 다른 분석을 작성하지 말고 아래 두 줄만 출력할 것
+[관련성]
+SKIP
+
+==========================
 [중요도 평가 기준]
 ==========================
 ■ 상
@@ -382,6 +453,9 @@ def analyze_with_llm(title, content, source_name):
 ==========================
 [응답 형식]
 ==========================
+
+[관련성]
+INCLUDE
 
 [한글 제목]
 핵심 기술 내용이 명확히 드러나는 한국어 직관적 제목
@@ -427,6 +501,11 @@ def analyze_with_llm(title, content, source_name):
     )
 
     result_text = response.choices[0].message.content or ""
+
+    if "[관련성]" in result_text:
+        relevance_part = result_text.split("[관련성]", 1)[1].split("[한글 제목]", 1)[0]
+        if "SKIP" in relevance_part.upper():
+            return "SKIP", "", "", []
 
     # 1) 한글 제목 추출
     korean_title = title
@@ -615,6 +694,11 @@ def main():
     print(f"🎉 [작업 완료] 성공: {success_count}건 | 스킵: {skip_count}건 | 실패: {fail_count}건")
     print("============================================================")
 
+    if fail_count:
+        print("❌ 일부 기사 처리에 실패하여 워크플로를 실패 상태로 종료합니다.")
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
